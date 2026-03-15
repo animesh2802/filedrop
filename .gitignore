@@ -1,0 +1,68 @@
+# dependencies
+node_modules/
+
+# build outputs
+.next/
+dist/
+build/
+out/
+.turbo/
+
+# environment variables
+.env
+.env.*
+!.env.example
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# cache
+.cache/
+.parcel-cache/
+.eslintcache
+
+# turborepo
+.turbo/
+
+# next.js
+.next/
+out/
+
+# testing
+coverage/
+
+# typescript
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# editor directories
+.vscode/
+.idea/
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# docker
+*.pid
+*.seed
+*.pid.lock
+
+# local runtime files
+tmp/
+temp/
+
+# package managers
+.pnpm-store/
+.npm/
+
+# misc
+*.local
