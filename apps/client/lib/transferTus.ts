@@ -1,4 +1,5 @@
 import * as tus from "tus-js-client"
+import { savePendingUpload, deletePendingUpload } from "./db"
 
 const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:4000"
 
@@ -10,29 +11,47 @@ export function uploadFileViaTus(
     onSuccess: (downloadUrl: string) => void,
     onError: (err: Error) => void
 ): tus.Upload {
-    const upload = new tus.Upload(file, {
+    const targetFile = resumeFromByte > 0
+        ? file.slice(resumeFromByte) as unknown as File
+        : file
+
+    const upload = new tus.Upload(targetFile, {
         endpoint: `${SERVER_URL}/uploads`,
         retryDelays: [0, 1000, 3000, 5000],
-        chunkSize: 5 * 1024 * 1024, // 5MB chunks for Tus (larger than WebRTC chunks)
-
-        // Metadata the server stores alongside the upload
+        chunkSize: 5 * 1024 * 1024,
         metadata: {
             fileId,
             filename: file.name,
             filetype: file.type || "application/octet-stream",
+            resumeFromByte: resumeFromByte.toString(),
         },
 
-        // Resume from a specific byte offset
-        // This is the key field for our WebRTC-to-Tus handoff
-        uploadLengthDeferred: false,
+        async onProgress(bytesUploaded, bytesTotal) {
+            const totalBytes = resumeFromByte + bytesTotal
+            const totalUploaded = resumeFromByte + bytesUploaded
+            onProgress(totalUploaded, totalBytes)
 
-        onProgress(bytesUploaded, bytesTotal) {
-            // Add the resumeFromByte offset so progress reflects the whole file
-            onProgress(bytesUploaded + resumeFromByte, bytesTotal)
+            // Persist progress to IndexedDB every time progress fires
+            // If the tab crashes mid-upload, we can resume from here
+            if (upload.url) {
+                await savePendingUpload({
+                    fileId,
+                    tusUploadUrl: upload.url,
+                    bytesUploaded: totalUploaded,
+                    fileName: file.name,
+                    fileSize: totalBytes,
+                    savedAt: Date.now(),
+                })
+            }
         },
 
-        onSuccess() {
-            const downloadUrl = `${SERVER_URL}/uploads/${upload.url?.split("/uploads/")[1]}`
+        async onSuccess() {
+            const uploadId = upload.url?.split("/uploads/")[1]
+            const downloadUrl = `${SERVER_URL}/uploads/${uploadId}`
+
+            // Clean up IndexedDB — transfer is done, no need to resume
+            await deletePendingUpload(fileId)
+
             onSuccess(downloadUrl)
         },
 
@@ -41,21 +60,6 @@ export function uploadFileViaTus(
             onError(err instanceof Error ? err : new Error(String(err)))
         },
     })
-
-    // If resumeFromByte > 0, this was a partial WebRTC transfer
-    // We need to slice the file to only upload the remaining portion
-    if (resumeFromByte > 0) {
-        const remainingSlice = file.slice(resumeFromByte)
-        const slicedUpload = new tus.Upload(remainingSlice as unknown as File, {
-            ...upload.options,
-            metadata: {
-                ...upload.options.metadata,
-                resumeFromByte: resumeFromByte.toString(),
-            },
-        })
-        slicedUpload.start()
-        return slicedUpload
-    }
 
     upload.start()
     return upload

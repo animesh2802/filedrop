@@ -5,6 +5,7 @@ import { useSocket } from "@/lib/useSocket"
 import type { FileMetadata } from "@filedrop/shared"
 import { useWebRTC } from "@/lib/useWebRTC"
 import { useTransfer } from "@/lib/useTransfer"
+import { getPendingUpload, cleanOldUploads } from "@/lib/db"
 
 export default function SendPage() {
     const { socket, isConnected } = useSocket()
@@ -17,6 +18,11 @@ export default function SendPage() {
     const selectedFilesRef = useRef<File[]>([])
     const fileMetadataRef = useRef<FileMetadata[]>([])
     const { progress } = useTransfer(selectedFilesRef.current, fileMetadataRef.current)
+
+    useEffect(() => {
+        // Clean up stale entries on mount
+        cleanOldUploads()
+    }, [])
 
     // Keep refs in sync with state
     useEffect(() => {
