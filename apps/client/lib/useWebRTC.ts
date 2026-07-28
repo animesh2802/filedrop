@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import { getSocket } from "./socket"
+import { sendFileOverDataChannel } from "./transferSender"
+import { FileReceiver } from "./transferReceiver"
+import type { FileMetadata } from "@filedrop/shared"
 
 // Google's public STUN server — free, no signup needed
 // In production you'd usually add more than one for redundancy
@@ -56,40 +59,117 @@ export function useWebRTC(role: "sender" | "receiver") {
     }, [socket])
 
     // --- SENDER SIDE: create offer ---
-    const startAsSender = useCallback(async () => {
-        setConnectionState("connecting")
-        const pc = createPeerConnection()
+    const startAsSender = useCallback(
+        async (files: File[], fileMetadata: FileMetadata[]) => {
+            setConnectionState("connecting")
+            const pc = createPeerConnection()
 
-        // Create the DataChannel BEFORE the offer
-        // Creating it is what triggers ICE negotiation to begin
-        const channel = pc.createDataChannel("file-transfer", {
-            ordered: true, // chunks must arrive in order — see our earlier discussion
-        })
-        dataChannelRef.current = channel
+            const channel = pc.createDataChannel("file-transfer", {
+                ordered: true,
+            })
+            dataChannelRef.current = channel
 
-        channel.onopen = () => {
-            console.log("[webrtc] data channel open (sender)")
-        }
+            channel.onopen = async () => {
+                console.log("[webrtc] data channel open (sender) — starting transfer")
 
-        const offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i]
+                    const meta = fileMetadata[i]
 
-        socket.emit("webrtc:offer", { offer })
-    }, [socket, createPeerConnection])
+                    // Send metadata first
+                    channel.send(
+                        JSON.stringify({
+                            type: "file-meta",
+                            fileId: meta.id,
+                            name: meta.name,
+                            size: meta.size,
+                            mimeType: meta.mimeType,
+                        })
+                    )
+
+                    // Send file bytes
+                    await sendFileOverDataChannel(
+                        file,
+                        meta.id,
+                        channel,
+                        (bytes) => {
+                            console.log(
+                                `[transfer] ${meta.name}: ${bytes}/${meta.size} bytes`
+                            )
+                        },
+                        (fileId, checkpoint) => {
+                            socket.emit("transfer:checkpoint", {
+                                fileId,
+                                bytesReceived: checkpoint,
+                            })
+                        }
+                    )
+
+                    // Notify receiver that file finished
+                    channel.send(
+                        JSON.stringify({
+                            type: "file-done",
+                            fileId: meta.id,
+                        })
+                    )
+
+                    socket.emit("transfer:complete", {
+                        fileId: meta.id,
+                    })
+                }
+            }
+
+            const offer = await pc.createOffer()
+            await pc.setLocalDescription(offer)
+
+            socket.emit("webrtc:offer", { offer })
+        },
+        [socket, createPeerConnection]
+    )
 
     // --- RECEIVER SIDE: create answer when offer arrives ---
     const startAsReceiver = useCallback(() => {
         setConnectionState("connecting")
         const pc = createPeerConnection()
 
-        // The receiver doesn't create the DataChannel — it RECEIVES one
-        // This event fires when the sender's channel reaches us
         pc.ondatachannel = (event) => {
             const channel = event.channel
             dataChannelRef.current = channel
 
+            let currentReceiver: FileReceiver | null = null
+
             channel.onopen = () => {
                 console.log("[webrtc] data channel open (receiver)")
+            }
+
+            channel.onmessage = (event) => {
+                // JSON control message
+                if (typeof event.data === "string") {
+                    const msg = JSON.parse(event.data)
+
+                    if (msg.type === "file-meta") {
+                        currentReceiver = new FileReceiver(
+                            msg.name,
+                            msg.size,
+                            msg.mimeType,
+                            (bytes) => {
+                                console.log(
+                                    `[transfer] receiving ${msg.name}: ${bytes}/${msg.size}`
+                                )
+                            }
+                        )
+                    }
+
+                    if (msg.type === "file-done" && currentReceiver) {
+                        currentReceiver.save()
+                        currentReceiver = null
+                    }
+                } else {
+                    // Binary chunk
+                    if (currentReceiver) {
+                        currentReceiver.receiveChunk(event.data as ArrayBuffer)
+                    }
+                }
             }
         }
     }, [createPeerConnection])

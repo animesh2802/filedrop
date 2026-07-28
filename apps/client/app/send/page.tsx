@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSocket } from "@/lib/useSocket"
 import type { FileMetadata } from "@filedrop/shared"
 import { useWebRTC } from "@/lib/useWebRTC"
+import { useTransfer } from "@/lib/useTransfer"
 
 export default function SendPage() {
     const { socket, isConnected } = useSocket()
@@ -12,6 +13,19 @@ export default function SendPage() {
     const [isCreatingRoom, setIsCreatingRoom] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
     const { connectionState, startAsSender } = useWebRTC("sender")
+    const [fileMetadata, setFileMetadata] = useState<FileMetadata[]>([])
+    const selectedFilesRef = useRef<File[]>([])
+    const fileMetadataRef = useRef<FileMetadata[]>([])
+    const { progress } = useTransfer(selectedFilesRef.current, fileMetadataRef.current)
+
+    // Keep refs in sync with state
+    useEffect(() => {
+        selectedFilesRef.current = selectedFiles
+    }, [selectedFiles])
+
+    useEffect(() => {
+        fileMetadataRef.current = fileMetadata
+    }, [fileMetadata])
 
     // All socket LISTENING happens here, registered once on mount
     useEffect(() => {
@@ -27,7 +41,8 @@ export default function SendPage() {
 
         function onReceiverJoined() {
             console.log("[send] receiver joined — starting WebRTC")
-            startAsSender()
+            console.log("[send] files in ref:", selectedFilesRef.current.length)
+            startAsSender(selectedFilesRef.current, fileMetadataRef.current)
         }
 
 
@@ -55,16 +70,18 @@ export default function SendPage() {
         setIsCreatingRoom(true)
         setErrorMessage(null)
 
-        const fileMetadata: FileMetadata[] = selectedFiles.map((file, index) => ({
+        const metadata: FileMetadata[] = selectedFiles.map((file, index) => ({
             id: `f_${index}_${Date.now()}`,
             name: file.name,
             size: file.size,
             mimeType: file.type || "application/octet-stream",
         }))
 
+        setFileMetadata(metadata)
+
         // EMITTING (sending) stays in the event handler, not in useEffect
         // We only emit when the user actually clicks the button
-        socket.emit("room:create", { files: fileMetadata })
+        socket.emit("room:create", { files: metadata })
     }
 
     return (

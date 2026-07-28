@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useSocket } from "@/lib/useSocket"
 import type { Room } from "@filedrop/shared"
 import { useWebRTC } from "@/lib/useWebRTC"
+import { useTransfer } from "@/lib/useTransfer"
 
 export default function ReceivePage() {
     const { socket, isConnected } = useSocket()
@@ -12,6 +13,10 @@ export default function ReceivePage() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
     const [isJoining, setIsJoining] = useState(false)
     const { connectionState, startAsReceiver } = useWebRTC("receiver")
+    
+    // Receiver has no files to upload — pass empty arrays
+    // useTransfer on receiver side only listens for transfer:tus-ready
+    const { progress } = useTransfer([], room?.files ? [] : [])
 
     // Effect 1 — socket listeners
     useEffect(() => {

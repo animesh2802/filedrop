@@ -2,6 +2,7 @@ import express from "express"
 import { createServer } from "http"
 import { Server } from "socket.io"
 import cors from "cors"
+import { mountTusServer, setIO } from "./tus/index.js"
 import { registerSocketHandlers } from "./socket/index.js"
 import type {
     ClientToServerEvents,
@@ -15,6 +16,8 @@ const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:3000"
 
 const app = express()
 app.use(cors({ origin: CLIENT_URL }))
+
+mountTusServer(app)
 
 app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() })
@@ -37,6 +40,9 @@ const io = new Server<
 
 // Register all socket event handlers
 registerSocketHandlers(io)
+
+setIO(io)
+mountTusServer(app)
 
 httpServer.listen(PORT, () => {
     console.log(`[server] running on http://localhost:${PORT}`)

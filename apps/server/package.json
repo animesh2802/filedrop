@@ -9,9 +9,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1095.0",
     "@filedrop/shared": "workspace:*",
-    "@tus/s3-store": "^2.0.0",
-    "@tus/server": "^2.0.0",
+    "@tus/s3-store": "^2.0.1",
+    "@tus/server": "^2.3.0",
     "cors": "^2.8.5",
     "express": "^4.19.0",
     "ioredis": "^5.3.2",

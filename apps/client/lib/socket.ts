@@ -17,8 +17,19 @@ let socket: TypedClientSocket | null = null
 export function getSocket(): TypedClientSocket {
     if (!socket) {
         socket = io(SERVER_URL, {
-            autoConnect: false, // we control when to connect, not on import
+            autoConnect: false,
+            // These two options prevent reconnection from creating a new socket identity
+            reconnection: true,
+            reconnectionDelay: 1000,
         })
     }
     return socket
+}
+
+// Call this when you want to fully reset — e.g. user explicitly ends session
+export function resetSocket(): void {
+    if (socket) {
+        socket.disconnect()
+        socket = null
+    }
 }
