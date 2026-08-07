@@ -14,7 +14,12 @@ const ICE_SERVERS: RTCIceServer[] = [
 
 type ConnectionState = "idle" | "connecting" | "connected" | "failed"
 
-export function useWebRTC(role: "sender" | "receiver") {
+interface WebRTCCallbacks {
+    onChunkSent?: (fileId: string, bytes: number) => void
+    onFileComplete?: (fileId: string) => void
+}
+
+export function useWebRTC(role: "sender" | "receiver", callbacks: WebRTCCallbacks = {}) {
     const socket = getSocket()
 
     // useRef instead of useState here because we need a value that
@@ -93,14 +98,13 @@ export function useWebRTC(role: "sender" | "receiver") {
                         meta.id,
                         channel,
                         (bytes) => {
-                            console.log(
-                                `[transfer] ${meta.name}: ${bytes}/${meta.size} bytes`
-                            )
+                            //Report to UI via callback
+                            callbacks.onChunkSent?.(meta.id, bytes)
                         },
                         (fileId, checkpoint) => {
                             socket.emit("transfer:checkpoint", {
                                 fileId,
-                                bytesReceived: checkpoint,
+                                bytesReceived: checkpoint
                             })
                         }
                     )
@@ -116,6 +120,8 @@ export function useWebRTC(role: "sender" | "receiver") {
                     socket.emit("transfer:complete", {
                         fileId: meta.id,
                     })
+
+                    callbacks.onFileComplete?.(meta.id)
                 }
             }
 
@@ -137,6 +143,7 @@ export function useWebRTC(role: "sender" | "receiver") {
             dataChannelRef.current = channel
 
             let currentReceiver: FileReceiver | null = null
+            let currentFileId = ""
 
             channel.onopen = () => {
                 console.log("[webrtc] data channel open (receiver)")
@@ -148,6 +155,7 @@ export function useWebRTC(role: "sender" | "receiver") {
                     const msg = JSON.parse(event.data)
 
                     if (msg.type === "file-meta") {
+                        currentFileId = msg.fileId
                         currentReceiver = new FileReceiver(
                             msg.name,
                             msg.size,
@@ -162,12 +170,21 @@ export function useWebRTC(role: "sender" | "receiver") {
 
                     if (msg.type === "file-done" && currentReceiver) {
                         currentReceiver.save()
+                        callbacks.onFileComplete?.(currentFileId)
                         currentReceiver = null
+                        currentFileId = ""
                     }
                 } else {
                     // Binary chunk
                     if (currentReceiver) {
-                        currentReceiver.receiveChunk(event.data as ArrayBuffer)
+                        const done = currentReceiver.receiveChunk(event.data as ArrayBuffer)
+                        //Report bytes received to UI
+                        callbacks.onChunkSent?.(currentFileId, currentReceiver.getBytesReceived())
+                        if (done) {
+                            currentReceiver.save()
+                            callbacks.onFileComplete?.(currentFileId)
+                            currentReceiver = null
+                        }
                     }
                 }
             }

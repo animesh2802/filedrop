@@ -5,6 +5,7 @@ export class FileReceiver {
     private fileName: string
     private mimeType: string
     private onProgress: (bytes: number) => void
+    private savedBlob: Blob | null = null
 
     constructor(
         fileName: string,
@@ -18,31 +19,26 @@ export class FileReceiver {
         this.onProgress = onProgress
     }
 
-    // Called every time a chunk arrives on the DataChannel
     receiveChunk(chunk: ArrayBuffer): boolean {
         this.chunks.push(chunk)
         this.bytesReceived += chunk.byteLength
         this.onProgress(this.bytesReceived)
-
-        // Return true if we've received everything
         return this.bytesReceived >= this.expectedSize
     }
 
-    // Called when all chunks are in — assembles and triggers download
     save(): void {
-        // Combine all ArrayBuffer chunks into one big Blob
         const blob = new Blob(this.chunks, { type: this.mimeType })
+        this.savedBlob = blob
+        this.triggerDownload(blob)
+    }
 
-        // Create a temporary download link and click it programmatically
-        // This is the standard browser pattern for triggering file downloads
+    private triggerDownload(blob: Blob): void {
         const url = URL.createObjectURL(blob)
         const a = document.createElement("a")
         a.href = url
         a.download = this.fileName
         document.body.appendChild(a)
         a.click()
-
-        // Clean up the object URL to free memory
         setTimeout(() => {
             URL.revokeObjectURL(url)
             document.body.removeChild(a)
@@ -51,5 +47,9 @@ export class FileReceiver {
 
     getBytesReceived(): number {
         return this.bytesReceived
+    }
+
+    getFileName(): string {
+        return this.fileName
     }
 }
