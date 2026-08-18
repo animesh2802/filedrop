@@ -5,7 +5,7 @@ export class FileReceiver {
     private fileName: string
     private mimeType: string
     private onProgress: (bytes: number) => void
-    private savedBlob: Blob | null = null
+    private blob: Blob | null = null
 
     constructor(
         fileName: string,
@@ -26,14 +26,17 @@ export class FileReceiver {
         return this.bytesReceived >= this.expectedSize
     }
 
-    save(): void {
-        const blob = new Blob(this.chunks, { type: this.mimeType })
-        this.savedBlob = blob
-        this.triggerDownload(blob)
+    // Called when transfer is complete — assembles blob but does NOT download
+    assemble(): void {
+        this.blob = new Blob(this.chunks, { type: this.mimeType })
+        // Free chunk memory — we only need the blob now
+        this.chunks = []
     }
 
-    private triggerDownload(blob: Blob): void {
-        const url = URL.createObjectURL(blob)
+    // Call this when user clicks download
+    download(): void {
+        if (!this.blob) return
+        const url = URL.createObjectURL(this.blob)
         const a = document.createElement("a")
         a.href = url
         a.download = this.fileName
@@ -43,6 +46,10 @@ export class FileReceiver {
             URL.revokeObjectURL(url)
             document.body.removeChild(a)
         }, 100)
+    }
+
+    getBlob(): Blob | null {
+        return this.blob
     }
 
     getBytesReceived(): number {

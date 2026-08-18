@@ -16,7 +16,7 @@ class FileDropDB extends Dexie {
 
     constructor() {
         super("filedrop")
-        this.version(1).stores({
+        this.version(2).stores({
             // Index by fileId for fast lookup
             // The ++ prefix means auto-increment primary key
             pendingUploads: "++id, fileId",
@@ -50,5 +50,8 @@ export async function deletePendingUpload(fileId: string): Promise<void> {
 // Clean up entries older than 24 hours on startup
 export async function cleanOldUploads(): Promise<void> {
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
-    await db.pendingUploads.where("savedAt").below(oneDayAgo).delete()
+    await db.pendingUploads
+        .where("savedAt")
+        .below(oneDayAgo)
+        .delete()
 }

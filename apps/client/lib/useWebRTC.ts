@@ -17,6 +17,7 @@ type ConnectionState = "idle" | "connecting" | "connected" | "failed"
 interface WebRTCCallbacks {
     onChunkSent?: (fileId: string, bytes: number) => void
     onFileComplete?: (fileId: string) => void
+    onFileAssembled?: (fileId: string, receiver: FileReceiver) => void
 }
 
 export function useWebRTC(role: "sender" | "receiver", callbacks: WebRTCCallbacks = {}) {
@@ -169,22 +170,19 @@ export function useWebRTC(role: "sender" | "receiver", callbacks: WebRTCCallback
                     }
 
                     if (msg.type === "file-done" && currentReceiver) {
-                        currentReceiver.save()
+                        currentReceiver.assemble()
+                        callbacks.onFileAssembled?.(currentFileId, currentReceiver)
                         callbacks.onFileComplete?.(currentFileId)
                         currentReceiver = null
                         currentFileId = ""
                     }
                 } else {
-                    // Binary chunk
+                    // Binary chunk — just receive and report progress
+                    // Never trigger completion here — wait for the "file-done" string message
+                    // which is guaranteed to arrive after all chunks on an ordered DataChannel
                     if (currentReceiver) {
-                        const done = currentReceiver.receiveChunk(event.data as ArrayBuffer)
-                        //Report bytes received to UI
+                        currentReceiver.receiveChunk(event.data as ArrayBuffer)
                         callbacks.onChunkSent?.(currentFileId, currentReceiver.getBytesReceived())
-                        if (done) {
-                            currentReceiver.save()
-                            callbacks.onFileComplete?.(currentFileId)
-                            currentReceiver = null
-                        }
                     }
                 }
             }
