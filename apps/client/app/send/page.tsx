@@ -8,6 +8,7 @@ import { FileProgressCard } from "@/components/FileProgressCard"
 import { uploadFileViaTus } from "@/lib/transferTus"
 import { cleanOldUploads } from "@/lib/db"
 import type { FileMetadata } from "@filedrop/shared"
+import { clearSession, useLeaveWarning } from "@/lib/useSessionPersistence"
 
 export default function SendPage() {
     const { socket, isConnected } = useSocket()
@@ -20,6 +21,9 @@ export default function SendPage() {
         "setup" | "waiting" | "transferring" | "done"
     >("setup")
     const [isDragging, setIsDragging] = useState(false)
+    const [peerDisconnected, setPeerDisconnected] = useState(false)
+
+    useLeaveWarning(sessionPhase !== "setup")
 
     const selectedFilesRef = useRef<File[]>([])
     const fileMetadataRef = useRef<FileMetadata[]>([])
@@ -56,11 +60,29 @@ export default function SendPage() {
         }
 
         function onReceiverJoined() {
+            if (selectedFilesRef.current.length === 0) {
+                setErrorMessage("Session was refreshed and file data was lost. Please start a new session.")
+                return
+            }
+            setPeerDisconnected(false)
             setSessionPhase("transferring")
             fileMetadataRef.current.forEach(meta =>
-                updateFile(meta.id, { phase: "connecting", path: "webrtc" })
+                updateFile(meta.id, { phase: "connecting", path: "webrtc", bytesTransferred: 0 })
             )
             startAsSender(selectedFilesRef.current, fileMetadataRef.current)
+        }
+
+        function onRoomClosed({ reason }: { reason: string }) {
+            if (reason === "sender-left" || reason === "receiver-left") {
+                setPeerDisconnected(true)
+            }
+            if (reason === "timeout") {
+                // Room expired — reset to setup
+                setSessionPhase("setup")
+                setRoomCode(null)
+                setErrorMessage("Room expired. Please create a new room.")
+                clearSession()
+            }
         }
 
         function onUseTus({ fileId, resumeFromByte }: {
@@ -87,6 +109,7 @@ export default function SendPage() {
         }
 
         socket.on("room:created", onRoomCreated)
+        socket.on("room:closed", onRoomClosed)
         socket.on("room:error", onRoomError)
         socket.on("room:receiver-joined", onReceiverJoined)
         socket.on("transfer:use-tus", onUseTus)
@@ -96,6 +119,7 @@ export default function SendPage() {
             socket.off("room:error", onRoomError)
             socket.off("room:receiver-joined", onReceiverJoined)
             socket.off("transfer:use-tus", onUseTus)
+            socket.off("room:closed", onRoomClosed)
         }
     }, [socket, startAsSender, updateFile])
 
@@ -145,10 +169,34 @@ export default function SendPage() {
                     File<span className="text-blue-400">drop</span>
                 </a>
 
+                {sessionPhase !== "setup" && (
+                    <button
+                        onClick={() => {
+                            socket.emit("room:leave")
+                            clearSession()
+                            setSessionPhase("setup")
+                            setSelectedFiles([])
+                            setFileMetadata([])
+                            setRoomCode(null)
+                            setErrorMessage(null)
+                            setPeerDisconnected(false)
+                        }}
+                        className="self-end text-xs text-gray-600 hover:text-red-400 transition-colors"
+                    >
+                        ✕ Start new session
+                    </button>
+                )}
+
                 {/* Connection status */}
                 <p className="text-xs text-gray-500">
                     {isConnected ? "🟢 Connected to server" : "🔴 Connecting..."}
                 </p>
+
+                {peerDisconnected && (
+                    <div className="w-full bg-yellow-950 border border-yellow-800 rounded-lg px-3 py-2 text-xs text-yellow-400 text-center">
+                        ⚠️ Your peer disconnected. Waiting for them to reconnect (up to 2 minutes)...
+                    </div>
+                )}
 
                 {errorMessage && (
                     <p className="text-sm text-red-400 text-center">{errorMessage}</p>
@@ -272,6 +320,7 @@ export default function SendPage() {
                         {sessionPhase === "done" && (
                             <button
                                 onClick={() => {
+                                    clearSession()
                                     setSessionPhase("setup")
                                     setSelectedFiles([])
                                     setFileMetadata([])

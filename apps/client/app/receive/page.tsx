@@ -8,6 +8,7 @@ import { FileProgressCard } from "@/components/FileProgressCard"
 import { FileReceiver } from "@/lib/transferReceiver"
 import type { Room } from "@filedrop/shared"
 import JSZip from "jszip"
+import { saveSession, clearSession, loadSession, useLeaveWarning } from "@/lib/useSessionPersistence"
 
 interface CompletedFile {
     fileId: string
@@ -28,6 +29,21 @@ export default function ReceivePage() {
     >("setup")
     const [completedFiles, setCompletedFiles] = useState<CompletedFile[]>([])
     const [isZipping, setIsZipping] = useState(false)
+    const [wasRestored, setWasRestored] = useState(false)
+    useLeaveWarning(sessionPhase === "transferring")
+    const [peerDisconnected, setPeerDisconnected] = useState(false)
+    const [disconnectReason, setDisconnectReason] = useState<string | null>(null)
+
+    useEffect(() => {
+        const session = loadSession()
+        if (session?.role === "receiver" && socket.connected) {
+            // Pre-fill the code input and auto-rejoin
+            setCodeInput(session.roomCode)
+            setIsJoining(true)
+            setWasRestored(true)
+            socket.emit("room:join", { code: session.roomCode })
+        }
+    }, [socket])
 
     const roomRef = useRef<Room | null>(null)
     useEffect(() => { roomRef.current = room }, [room])
@@ -58,6 +74,7 @@ export default function ReceivePage() {
 
     useEffect(() => {
         function onRoomJoined({ room }: { room: Room }) {
+            setPeerDisconnected(false)
             setRoom(room)
             setIsJoining(false)
             setSessionPhase("transferring")
@@ -65,11 +82,20 @@ export default function ReceivePage() {
             room.files.forEach(f =>
                 updateFile(f.id, { phase: "connecting", path: "webrtc" })
             )
+            saveSession({ roomCode: room.code, role: "receiver", savedAt: Date.now() })
         }
 
         function onRoomError({ message }: { message: string }) {
             setErrorMessage(message)
             setIsJoining(false)
+        }
+
+        function onRoomClosed({ reason }: { reason: string }) {
+            setPeerDisconnected(true)
+            setDisconnectReason(reason)
+            if (reason === "sender-left") {
+                clearSession()
+            }
         }
 
         // Tus file ready — add to completed list with a URL instead of blob
@@ -90,13 +116,16 @@ export default function ReceivePage() {
         }
 
         socket.on("room:joined", onRoomJoined)
+        socket.on("room:closed", onRoomClosed)
         socket.on("room:error", onRoomError)
         socket.on("transfer:tus-ready", onTusReady)
+
 
         return () => {
             socket.off("room:joined", onRoomJoined)
             socket.off("room:error", onRoomError)
             socket.off("transfer:tus-ready", onTusReady)
+            socket.off("room:closed", onRoomClosed)
         }
     }, [socket, updateFile, initFiles])
 
@@ -130,6 +159,7 @@ export default function ReceivePage() {
     }
 
     async function downloadAll() {
+        setIsZipping(true)
         try {
             const zip = new JSZip()
 
@@ -194,6 +224,43 @@ export default function ReceivePage() {
                     }
                 </p>
 
+                {peerDisconnected && disconnectReason === "sender-left" && (
+                    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-8">
+                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 max-w-sm w-full flex flex-col items-center gap-4 text-center">
+                            <span className="text-4xl">⚠️</span>
+                            <h2 className="text-lg font-semibold">Sender disconnected</h2>
+                            <p className="text-sm text-gray-400">
+                                The sender left the session. Ask them to create a new room and share the code with you.
+                            </p>
+                            <button
+                                onClick={() => window.location.reload()}
+                                className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium transition-colors text-sm"
+                            >
+                                Refresh page
+                            </button>
+                            <button
+                                onClick={() => {
+                                    clearSession()
+                                    setSessionPhase("setup")
+                                    setRoom(null)
+                                    setCodeInput("")
+                                    setCompletedFiles([])
+                                    setPeerDisconnected(false)
+                                }}
+                                className="w-full px-6 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg font-medium transition-colors text-sm"
+                            >
+                                Start over
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {peerDisconnected && disconnectReason === "receiver-left" && (
+                    <div className="w-full bg-yellow-950 border border-yellow-800 rounded-lg px-3 py-2 text-xs text-yellow-400 text-center">
+                        ⚠️ You were briefly disconnected. Reconnecting...
+                    </div>
+                )}
+
                 {errorMessage && (
                     <p className="text-sm text-red-400 text-center">{errorMessage}</p>
                 )}
@@ -229,6 +296,13 @@ export default function ReceivePage() {
                         <p className="text-xs text-gray-600 text-center">
                             Files will be ready to download once transfer completes
                         </p>
+
+                        {wasRestored && (   // ← add this block here
+                            <p className="text-xs text-blue-400 text-center">
+                                ↩ Session restored — reconnected to room
+                            </p>
+                        )}
+
                         {fileList.map(fp => (
                             <FileProgressCard key={fp.fileId} file={fp} />
                         ))}
@@ -278,6 +352,7 @@ export default function ReceivePage() {
 
                         <button
                             onClick={() => {
+                                clearSession()
                                 setSessionPhase("setup")
                                 setRoom(null)
                                 setCodeInput("")

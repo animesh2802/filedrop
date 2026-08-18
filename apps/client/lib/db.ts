@@ -19,7 +19,7 @@ class FileDropDB extends Dexie {
         this.version(2).stores({
             // Index by fileId for fast lookup
             // The ++ prefix means auto-increment primary key
-            pendingUploads: "++id, fileId",
+            pendingUploads: "++id, fileId, savedAt",
         })
     }
 }

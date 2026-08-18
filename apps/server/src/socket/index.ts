@@ -73,8 +73,17 @@ export function registerSocketHandlers(io: TypedServer): void {
                     return
                 }
                 if (room.status === "active") {
-                    socket.emit("room:error", { message: "Room is already full" })
-                    return
+                    // Check if this is a reconnection attempt — room exists but receiver slot is open
+                    // because the previous receiver disconnected (their socket ID is gone)
+                    const previousReceiverConnected = room.receiverId
+                        ? (await io.fetchSockets()).some(s => s.id === room.receiverId)
+                        : false
+
+                    if (previousReceiverConnected) {
+                        socket.emit("room:error", { message: "Room is already full" })
+                        return
+                    }
+                    // Previous receiver disconnected — allow rejoin
                 }
                 if (room.status === "closed") {
                     socket.emit("room:error", { message: "Room is closed" })
@@ -151,12 +160,21 @@ export function registerSocketHandlers(io: TypedServer): void {
             console.log(`[socket] disconnected: ${socket.id} — ${reason}`)
             const code = socket.data.roomCode
             if (!code) return
+
             const room = await getRoom(code)
             if (!room || room.status === "closed") return
-            console.log(`[room] ${socket.id} disconnected from room ${code} — starting grace period`)
-            await extendRoomForReconnect(code)
-            const closeReason = socket.data.role === "sender" ? "sender-left" : "receiver-left"
-            socket.to(code).emit("room:closed", { reason: closeReason })
+
+            if (socket.data.role === "sender") {
+                // Sender left — destroy room immediately, no grace period
+                await deleteRoom(code)
+                io.to(code).emit("room:closed", { reason: "sender-left" })
+                console.log(`[room] destroyed: ${code} — sender disconnected`)
+            } else {
+                // Receiver left — grace period still applies
+                await extendRoomForReconnect(code)
+                socket.to(code).emit("room:closed", { reason: "receiver-left" })
+                console.log(`[room] ${socket.id} disconnected — receiver grace period started`)
+            }
         })
     })
 }
