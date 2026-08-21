@@ -62,13 +62,16 @@ export default function ReceivePage() {
         onFileAssembled: (fileId, receiver) => {
             const meta = roomRef.current?.files.find(f => f.id === fileId)
             if (!meta) return
-            setCompletedFiles(prev => [...prev, {
-                fileId,
-                name: meta.name,
-                size: meta.size,
-                receiver,
-                downloadUrl: undefined,
-            }])
+            setCompletedFiles(prev => {
+                if (prev.some(f => f.fileId === fileId)) return prev
+                return [...prev, {
+                    fileId,
+                    name: meta.name,
+                    size: meta.size,
+                    receiver,  // keep receiver reference for isStreamedToDisk() check
+                    downloadUrl: undefined,
+                }]
+            })
         },
     })
 
@@ -99,20 +102,14 @@ export default function ReceivePage() {
         }
 
         // Tus file ready — add to completed list with a URL instead of blob
-        function onTusReady({ fileId, downloadUrl }: {
-            fileId: string
-            downloadUrl: string
-        }) {
+        function onTusReady({ fileId, downloadUrl }: { fileId: string; downloadUrl: string }) {
             updateFile(fileId, { phase: "done" })
             const meta = roomRef.current?.files.find(f => f.id === fileId)
             if (!meta) return
-            setCompletedFiles(prev => [...prev, {
-                fileId,
-                name: meta.name,
-                size: meta.size,
-                receiver: null,
-                downloadUrl,
-            }])
+            setCompletedFiles(prev => {
+                if (prev.some(f => f.fileId === fileId)) return prev  // ← already exists
+                return [...prev, { fileId, name: meta.name, size: meta.size, receiver: null, downloadUrl }]
+            })
         }
 
         socket.on("room:joined", onRoomJoined)
@@ -296,6 +293,9 @@ export default function ReceivePage() {
                         <p className="text-xs text-gray-600 text-center">
                             Files will be ready to download once transfer completes
                         </p>
+                        <p className="text-xs text-gray-600 text-center">
+                            Large files (50MB+) will be saved directly to disk on Chrome/Edge
+                        </p>
 
                         {wasRestored && (   // ← add this block here
                             <p className="text-xs text-blue-400 text-center">
@@ -340,12 +340,18 @@ export default function ReceivePage() {
                                         <p className="text-sm text-gray-200 truncate">{file.name}</p>
                                         <p className="text-xs text-gray-500">{formatBytes(file.size)}</p>
                                     </div>
-                                    <button
-                                        onClick={() => downloadFile(file)}
-                                        className="shrink-0 text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg transition-colors"
-                                    >
-                                        ↓ Save
-                                    </button>
+                                    {file.receiver?.isStreamedToDisk() ? (
+                                        <span className="shrink-0 text-xs text-green-400">
+                                            ✅ Saved to disk
+                                        </span>
+                                    ) : (
+                                        <button
+                                            onClick={() => downloadFile(file)}
+                                            className="shrink-0 text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg transition-colors"
+                                        >
+                                            ↓ Save
+                                        </button>
+                                    )}
                                 </div>
                             ))}
                         </div>

@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import "./globals.css"
+import { StreamSaverInit } from "@/components/StreamSaverInit"
 
 export const metadata: Metadata = {
   title: "FileDrop",
@@ -14,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-gray-950 text-white min-h-screen">
+        <StreamSaverInit />
         {children}
       </body>
     </html>

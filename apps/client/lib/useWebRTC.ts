@@ -5,9 +5,8 @@ import { getSocket } from "./socket"
 import { sendFileOverDataChannel } from "./transferSender"
 import { FileReceiver } from "./transferReceiver"
 import type { FileMetadata } from "@filedrop/shared"
+import { throttle } from "./throttle"
 
-// Google's public STUN server — free, no signup needed
-// In production you'd usually add more than one for redundancy
 const ICE_SERVERS: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
 ]
@@ -78,6 +77,10 @@ export function useWebRTC(role: "sender" | "receiver", callbacks: WebRTCCallback
             channel.onopen = async () => {
                 console.log("[webrtc] data channel open (sender) — starting transfer")
 
+                const reportProgress = throttle((fileId: string, bytes: number) => {
+                    callbacks.onChunkSent?.(fileId, bytes)
+                }, 200)
+
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i]
                     const meta = fileMetadata[i]
@@ -100,7 +103,7 @@ export function useWebRTC(role: "sender" | "receiver", callbacks: WebRTCCallback
                         channel,
                         (bytes) => {
                             //Report to UI via callback
-                            callbacks.onChunkSent?.(meta.id, bytes)
+                            reportProgress(meta.id, bytes)
                         },
                         (fileId, checkpoint) => {
                             socket.emit("transfer:checkpoint", {
@@ -146,6 +149,11 @@ export function useWebRTC(role: "sender" | "receiver", callbacks: WebRTCCallback
             let currentReceiver: FileReceiver | null = null
             let currentFileId = ""
 
+            // Create throttled reporter for this channel
+            const reportProgress = throttle((fileId: string, bytes: number) => {
+                callbacks.onChunkSent?.(fileId, bytes)
+            }, 200)
+
             channel.onopen = () => {
                 console.log("[webrtc] data channel open (receiver)")
             }
@@ -167,22 +175,40 @@ export function useWebRTC(role: "sender" | "receiver", callbacks: WebRTCCallback
                                 )
                             }
                         )
+
+                        // Try to init File System Access API for large files
+                        // For small files (<10MB) skip the picker and use in-memory
+                        const LARGE_FILE_THRESHOLD = 10 * 1024 * 1024 // 10MB
+                        if (msg.size > LARGE_FILE_THRESHOLD) {
+                            currentReceiver.initFileSystemAccess().then((success) => {
+                                if (success) {
+                                    console.log(`[receiver] ${msg.name} will stream directly to disk`)
+                                }
+                            })
+                        }
                     }
 
                     if (msg.type === "file-done" && currentReceiver) {
-                        currentReceiver.assemble()
-                        callbacks.onFileAssembled?.(currentFileId, currentReceiver)
-                        callbacks.onFileComplete?.(currentFileId)
+                        const receiver = currentReceiver
+                        const fileId = currentFileId
                         currentReceiver = null
                         currentFileId = ""
+
+                        // assemble is now async
+                        receiver.assemble().then(() => {
+                            callbacks.onFileAssembled?.(fileId, receiver)
+                            callbacks.onFileComplete?.(fileId)
+                        })
                     }
                 } else {
                     // Binary chunk — just receive and report progress
                     // Never trigger completion here — wait for the "file-done" string message
                     // which is guaranteed to arrive after all chunks on an ordered DataChannel
                     if (currentReceiver) {
-                        currentReceiver.receiveChunk(event.data as ArrayBuffer)
-                        callbacks.onChunkSent?.(currentFileId, currentReceiver.getBytesReceived())
+                        const receiver = currentReceiver
+                        const fileId = currentFileId
+                        receiver.receiveChunk(event.data as ArrayBuffer)
+                        reportProgress(fileId, receiver!.getBytesReceived())
                     }
                 }
             }

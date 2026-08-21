@@ -52,20 +52,27 @@ export function FileProgressCard({ file }: Props) {
                 <div>
                     <p className="font-medium text-sm truncate max-w-[240px]">{file.name}</p>
                     <p className="text-xs text-gray-500">
-                        {formatBytes(file.bytesTransferred)} / {formatBytes(file.totalBytes)}
+                        {file.phase === "done"
+                            ? formatBytes(file.totalBytes)
+                            : `${formatBytes(file.bytesTransferred)} / ${formatBytes(file.totalBytes)}`}
                     </p>
                 </div>
                 <div className="text-right">
-                    {pathLabel && (
-                        <p className="text-xs text-gray-400">{pathLabel}</p>
-                    )}
-                    {file.phase === "transferring" && (
-                        <p className="text-xs text-gray-400">{formatSpeed(file.speed)}</p>
+                    {file.phase === "done" ? (
+                        <p className="text-xs text-green-400">✅ Complete</p>
+                    ) : (
+                        <>
+                            {pathLabel && (
+                                <p className="text-xs text-gray-400">{pathLabel}</p>
+                            )}
+                            {file.phase === "transferring" && (
+                                <p className="text-xs text-gray-400">{formatSpeed(file.speed)}</p>
+                            )}
+                        </>
                     )}
                 </div>
             </div>
 
-            {/* Progress bar */}
             <div className="w-full bg-gray-800 rounded-full h-2 mb-2">
                 <div
                     className={`h-2 rounded-full transition-all duration-300 ${phaseColor}`}

@@ -27,6 +27,7 @@ export default function SendPage() {
 
     const selectedFilesRef = useRef<File[]>([])
     const fileMetadataRef = useRef<FileMetadata[]>([])
+    const completedFileIds = useRef<Set<string>>(new Set())
 
     useEffect(() => { selectedFilesRef.current = selectedFiles }, [selectedFiles])
     useEffect(() => { fileMetadataRef.current = fileMetadata }, [fileMetadata])
@@ -38,6 +39,7 @@ export default function SendPage() {
             updateFile(fileId, { bytesTransferred: bytes, phase: "transferring", path: "webrtc" })
         },
         onFileComplete: (fileId) => {
+            completedFileIds.current.add(fileId)
             updateFile(fileId, { phase: "done" })
             const all = Object.values(fileProgress)
             const allDone = all.every(f => f.fileId === fileId || f.phase === "done")
@@ -90,6 +92,12 @@ export default function SendPage() {
             resumeFromByte: number
             uploadUrl: string
         }) {
+            // Skip if WebRTC already completed this file
+            if (completedFileIds.current.has(fileId)) {
+                console.log(`[tus] skipping ${fileId} — already completed via WebRTC`)
+                return
+            }
+
             const metaIndex = fileMetadataRef.current.findIndex(m => m.id === fileId)
             if (metaIndex === -1) return
             const file = selectedFilesRef.current[metaIndex]
@@ -320,6 +328,7 @@ export default function SendPage() {
                         {sessionPhase === "done" && (
                             <button
                                 onClick={() => {
+                                    completedFileIds.current = new Set()  // ← add this line
                                     clearSession()
                                     setSessionPhase("setup")
                                     setSelectedFiles([])
