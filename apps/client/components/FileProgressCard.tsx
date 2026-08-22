@@ -50,7 +50,7 @@ export function FileProgressCard({ file }: Props) {
         <div className="bg-gray-900 rounded-xl p-4 w-full max-w-md">
             <div className="flex justify-between items-start mb-2">
                 <div>
-                    <p className="font-medium text-sm truncate max-w-[240px]">{file.name}</p>
+                    <p className="font-medium text-sm truncate max-w-60">{file.name}</p>
                     <p className="text-xs text-gray-500">
                         {file.phase === "done"
                             ? formatBytes(file.totalBytes)
